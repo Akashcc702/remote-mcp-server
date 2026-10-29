@@ -7,6 +7,7 @@ import contextlib
 import uvicorn
 from starlette.responses import JSONResponse
 from mcp.server.mcpserver import MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 # 1. 32-character Secret Token (can be overridden via environment variable MCP_TOKEN)
 AUTH_TOKEN = os.environ.get("MCP_TOKEN", "c9c7230c9f593c89d8847bbdc4fecea1")
@@ -56,12 +57,20 @@ async def health_check(request):
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
     })
 
-# 5. Build the Starlette SSE application with token-protected routes
+# 5. Disable DNS rebinding protection so Render.com public domain works properly
+security_settings = TransportSecuritySettings(
+    enable_dns_rebinding_protection=False,
+    allowed_hosts=["*"],
+    allowed_origins=["*"]
+)
+
+# 6. Build the Starlette SSE application with token-protected routes
 # GET /mcp-sec-<token> -> SSE stream
 # POST /mcp-sec-<token>/messages/ -> Message receiver
 app = mcp.sse_app(
     sse_path=f"/mcp-sec-{AUTH_TOKEN}",
-    message_path=f"/mcp-sec-{AUTH_TOKEN}/messages/"
+    message_path=f"/mcp-sec-{AUTH_TOKEN}/messages/",
+    transport_security=security_settings
 )
 
 if __name__ == "__main__":
