@@ -5,7 +5,8 @@ import datetime
 import io
 import contextlib
 import uvicorn
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
+from starlette.middleware.cors import CORSMiddleware
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
@@ -72,6 +73,28 @@ app = mcp.sse_app(
     message_path=f"/mcp-sec-{AUTH_TOKEN}/messages/",
     transport_security=security_settings
 )
+
+# 7. Add CORS Middleware so Claude web clients can interact seamlessly
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=True,
+)
+
+# 8. Wrap SSE route to accept POST and OPTIONS preflight checks from Claude connector broker
+for route in app.routes:
+    if hasattr(route, "path") and route.path == f"/mcp-sec-{AUTH_TOKEN}":
+        orig_endpoint = route.endpoint
+        async def handle_probe_and_sse(request, _orig=orig_endpoint):
+            if request.method == "OPTIONS":
+                return Response(status_code=200, headers={"Allow": "GET, POST, OPTIONS, HEAD"})
+            if request.method == "POST":
+                return JSONResponse({"jsonrpc": "2.0", "result": {"status": "ok", "transport": "sse"}})
+            return await _orig(request)
+        route.endpoint = handle_probe_and_sse
+        route.methods = {"GET", "POST", "OPTIONS", "HEAD"}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
